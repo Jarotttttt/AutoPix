@@ -134,12 +134,6 @@ Eksplorasi bawah laut terumbu karang dengan makhluk bioluminescent
 
 ---
 
-## ⚠️ Disclaimer
-
-Alat ini untuk **tujuan edukasi** semata. Gunakan dengan bijak dan sesuai Ketentuan Layanan PixVerse. Penulis tidak bertanggung jawab atas penyalahgunaan.
-
----
-
 <p align="center">
   Dibuat dengan ⚡ oleh <b>Jarot</b>
 </p>
