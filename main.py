@@ -1,3 +1,8 @@
+import ctypes
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('autopixverse.app.1.0')
+except Exception:
+    pass
 import os
 import re
 import sys
@@ -97,9 +102,9 @@ class App:
         version_lbl = ctk.CTkLabel(sidebar, text=f"{APP_VERSION}", font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"), text_color=PURPLE_COLOR)
         version_lbl.grid(row=1, column=0, padx=20, pady=(0, 32), sticky="w")
         
-        self.svg_user = tksvg.SvgImage(file="assets/user.svg", scaletowidth=18)
-        self.svg_video = tksvg.SvgImage(file="assets/video.svg", scaletowidth=18)
-        self.svg_dl = tksvg.SvgImage(file="assets/download.svg", scaletowidth=18)
+        self.svg_user = tksvg.SvgImage(file=resource_path("assets/user.svg"), scaletowidth=18)
+        self.svg_video = tksvg.SvgImage(file=resource_path("assets/video.svg"), scaletowidth=18)
+        self.svg_dl = tksvg.SvgImage(file=resource_path("assets/download.svg"), scaletowidth=18)
 
         btn_font = ctk.CTkFont(family="Segoe UI", size=13, weight="bold")
         self.btn_akun = ctk.CTkButton(sidebar, text="  Buat Akun", image=self.svg_user, anchor="w", fg_color="transparent", text_color=TEXT_MUTED, hover_color="#222226", command=lambda: self.select_tab("akun"), font=btn_font, height=40)
@@ -825,3 +830,4 @@ class App:
 if __name__ == "__main__":
     app = App()
     app.window.mainloop()
+

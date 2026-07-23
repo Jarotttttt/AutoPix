@@ -103,12 +103,11 @@ Eksplorasi bawah laut terumbu karang
 
 ---
 
-## ⚠️ Disclaimer
-
-Untuk **tujuan edukasi**. Gunakan sesuai Ketentuan Layanan PixVerse.
-
----
-
 <p align="center">
   Dibuat dengan ⚡ oleh <b>Creator La</b>
+</p>
+
+
+<p align="center">
+  &copy; 2026 Jarot - All Rights Reserved.
 </p>
