@@ -141,5 +141,5 @@ Alat ini untuk **tujuan edukasi** semata. Gunakan dengan bijak dan sesuai Ketent
 ---
 
 <p align="center">
-  Dibuat dengan ⚡ oleh <b>Creator La</b>
+  Dibuat dengan ⚡ oleh <b>Jarot</b>
 </p>
