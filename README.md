@@ -8,8 +8,8 @@
 </p>
 
 <p align="center">
-  <b>Alat otomatisasi desktop untuk PixVerse</b> — <br/>
-  Buat akun massal, generate video AI, dan kelola unduhan — semua dari GUI dark premium.
+  <b>Alat otomatisasi desktop untuk PixVerse</b>  <br/>
+  Buat akun massal, generate video AI, dan kelola unduhan  semua dari GUI dark premium.
 </p>
 
 ---
@@ -23,7 +23,7 @@
 | ⬇️ **Unduhan Cerdas** | Deteksi & download semua video yang sudah digenerate ke folder lokal |
 | 🧵 **Eksekusi Paralel** | Semua browser berjalan bersamaan via `ThreadPoolExecutor` |
 | 🛡️ **Browser Anti-Deteksi** | Pakai SeleniumBase + undetected-chromedriver agar tidak terdeteksi bot |
-| ⚡ **React-Ready** | Penanganan input React/Vue native — kompatibel dengan SPA modern |
+| ⚡ **React-Ready** | Penanganan input React/Vue native  kompatibel dengan SPA modern |
 | 🌙 **Dark UI** | Tampilan dark premium dibangun dengan CustomTkinter |
 
 ---
@@ -56,13 +56,13 @@ Hasil kompilasi ada di `dist/Auto Pixverse.exe`.
 ## 🧠 Cara Kerja
 
 ### 1. Pembuatan Akun
-Membuka N browser secara bersamaan, mendaftar via temp-mail.ai, mengisi kode OTP otomatis, dan menyimpan sesi yang sudah login — siap pakai.
+Membuka N browser secara bersamaan, mendaftar via temp-mail.ai, mengisi kode OTP otomatis, dan menyimpan sesi yang sudah login  siap pakai.
 
 ### 2. Generate Video
 Mendistribusikan prompt secara round-robin ke semua akun yang aktif. Setiap akun memproses video yang ditugaskan secara konkuren. Popup "Maximum concurrent generations" ditangani otomatis.
 
 ### 3. Unduh
-Transfer cookie dari sesi browser untuk mendownload video langsung — tanpa perlu login manual.
+Transfer cookie dari sesi browser untuk mendownload video langsung  tanpa perlu login manual.
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────┐
