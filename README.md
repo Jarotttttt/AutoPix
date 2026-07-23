@@ -9,7 +9,7 @@
 
 <p align="center">
   <b>Alat otomatisasi desktop untuk PixVerse</b> — <br/>
-  Buat akun massal, generate video AI, dan kelola unduhan — semua dari GUI dark premium.
+  Buat akun, generate video AI, dan unduh — semua dari sidebar navigasi dengan ikon SVG.
 </p>
 
 ---
@@ -18,89 +18,56 @@
 
 | Fitur | Deskripsi |
 |-------|-----------|
-| 🤖 **Buat Akun Massal** | Daftarkan ratusan akun PixVerse otomatis pakai temp-mail.ai + deteksi OTP |
-| 🎥 **Generator Video AI** | Generate video batch dari teks prompt di banyak akun sekaligus |
-| ⬇️ **Unduhan Cerdas** | Deteksi & download semua video yang sudah digenerate ke folder lokal |
-| 🧵 **Eksekusi Paralel** | Semua browser berjalan bersamaan via `ThreadPoolExecutor` |
-| 🛡️ **Browser Anti-Deteksi** | Pakai SeleniumBase + undetected-chromedriver agar tidak terdeteksi bot |
-| ⚡ **React-Ready** | Penanganan input React/Vue native — kompatibel dengan SPA modern |
-| 🌙 **Dark UI** | Tampilan dark premium dibangun dengan CustomTkinter |
+| 🤖 **Buat Akun** | Daftarkan akun PixVerse otomatis via temp-mail.ai + deteksi OTP |
+| 🎥 **Generate Video** | Batch-generate video dari teks prompt, round-robin ke semua akun |
+| ⬇️ **Download** | Deteksi & download semua video ke folder lokal |
+| 🧵 **Paralel** | Semua browser berjalan bersamaan via `ThreadPoolExecutor` |
+| 🛡️ **Anti-Deteksi** | SeleniumBase + undetected-chromedriver |
+| 🎨 **Sidebar UI** | Navigasi sidebar modern dengan ikon SVG |
 
 ---
 
 ## 🚀 Mulai Cepat
 
 ```bash
-# 1. Clone repositori
-git clone https://github.com/yourusername/autopix.git
-cd autopix
-
-# 2. Install dependensi
-pip install customtkinter seleniumbase requests pillow
-
-# 3. Jalankan
+pip install customtkinter seleniumbase requests pillow tksvg
 python main.py
 ```
 
-### 🔧 Build ke Executable
+### 🔧 Build Executable
 
 ```bash
 pip install pyinstaller
 pyinstaller main.spec
 ```
 
-Hasil kompilasi ada di `dist/Auto Pixverse.exe`.
-
 ---
 
 ## 🧠 Cara Kerja
 
-### 1. Pembuatan Akun
-Membuka N browser secara bersamaan, mendaftar via temp-mail.ai, mengisi kode OTP otomatis, dan menyimpan sesi yang sudah login — siap pakai.
-
-### 2. Generate Video
-Mendistribusikan prompt secara round-robin ke semua akun yang aktif. Setiap akun memproses video yang ditugaskan secara konkuren. Popup "Maximum concurrent generations" ditangani otomatis.
-
-### 3. Unduh
-Transfer cookie dari sesi browser untuk mendownload video langsung — tanpa perlu login manual.
-
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  Buat       │────▶│  Generate    │────▶│  Unduh      │
-│  Akun       │     │  Video       │     │  Video      │
-└─────────────┘     └──────────────┘     └─────────────┘
+┌─────────────┐    ┌─────────────┐    ┌────────────┐
+│  Buat Akun  │───▶│  Generate   │───▶│  Download  │
+│             │    │  Video      │    │  Video     │
+└─────────────┘    └─────────────┘    └────────────┘
 ```
+
+1. **Buat Akun** — Buka N browser, daftar via temp-mail.ai, simpan sesi login
+2. **Generate** — Distribusi prompt round-robin, handle popup limit otomatis
+3. **Download** — Transfer cookie → download video langsung
 
 ---
 
-## 🖥️ Tampilan Aplikasi
+## ⚙️ Format Prompt
 
-| Tab | Fungsi |
-|-----|--------|
-| **Buat Akun** | Atur jumlah akun, mulai/hentikan pendaftaran massal |
-| **Generate Video** | Tempel prompt (pisahkan dengan baris kosong), generate batch |
-| **Download** | Pilih folder, download semua video sekaligus |
-
----
-
-## ⚙️ Konfigurasi
-
-Tidak perlu environment variables. Semua autentikasi ditangani otomatis:
-
-- **Email**: Inbox sementara via API [temp-mail.ai](https://temp-mail.ai)
-- **Browser**: SeleniumBase dengan `uc=True` (mode undetected)
-- **OTP**: Dipolling dari inbox dengan timeout 90 detik
-
-### Format Prompt
-
-Tempel beberapa prompt video di text box, pisahkan dengan **satu baris kosong**:
+Paste prompt di text box, pisahkan dengan **satu baris kosong**:
 
 ```
-Sebuah drone shot sinematik kota futuristik saat matahari terbenam
+Sebuah drone shot kota futuristik saat matahari terbenam
 
 Close-up tangan robot menyentuh tangan manusia
 
-Eksplorasi bawah laut terumbu karang dengan makhluk bioluminescent
+Eksplorasi bawah laut terumbu karang
 ```
 
 ---
@@ -108,14 +75,16 @@ Eksplorasi bawah laut terumbu karang dengan makhluk bioluminescent
 ## 📁 Struktur Proyek
 
 ```
-├── main.py                          # Entry point GUI
-├── main.spec                        # Konfigurasi build PyInstaller
+├── main.py                         # Entry point GUI
+├── main.spec                       # PyInstaller config
+├── assets/                         # SVG icons untuk sidebar
+│   ├── user.svg
+│   ├── video.svg
+│   └── download.svg
 ├── core/
-│   ├── pixverse_creator.py          # Logika registrasi akun
-│   ├── pixverse_video_generator.py  # Otomatisasi generate video
-│   └── video_downloader.py          # Engine unduh video
-├── dist/
-│   └── Auto Pixverse.exe           # Executable siap pakai
+│   ├── pixverse_creator.py         # Registrasi akun
+│   ├── pixverse_video_generator.py # Generate video
+│   └── video_downloader.py         # Download engine
 ├── .gitignore
 └── README.md
 ```
@@ -126,17 +95,17 @@ Eksplorasi bawah laut terumbu karang dengan makhluk bioluminescent
 
 | Teknologi | Kegunaan |
 |-----------|----------|
-| [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) | Framework GUI dark modern |
-| [SeleniumBase](https://seleniumbase.io/) | Otomatisasi browser anti-deteksi |
-| [temp-mail.ai](https://temp-mail.ai) | API email sementara |
-| [PyInstaller](https://pyinstaller.org/) | Python → Executable Windows |
+| CustomTkinter | GUI dark modern |
+| SeleniumBase | Browser automation anti-deteksi |
+| tksvg | Rendering ikon SVG native |
+| temp-mail.ai | API email sementara |
 | Python 3.10+ | Bahasa utama |
 
 ---
 
 ## ⚠️ Disclaimer
 
-Alat ini untuk **tujuan edukasi** semata. Gunakan dengan bijak dan sesuai Ketentuan Layanan PixVerse. Penulis tidak bertanggung jawab atas penyalahgunaan.
+Untuk **tujuan edukasi**. Gunakan sesuai Ketentuan Layanan PixVerse.
 
 ---
 
