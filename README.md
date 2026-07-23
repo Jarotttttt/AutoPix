@@ -134,6 +134,5 @@ Eksplorasi bawah laut terumbu karang dengan makhluk bioluminescent
 
 ---
 
-<p align="center">
-  Dibuat oleh <b>Jarot</b>
-</p>
+<br>
+<p align="center"><b>© 2026 Jarot - All Rights Reserved.</b></p>
