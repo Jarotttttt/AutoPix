@@ -9,6 +9,7 @@ from .mail_service import (
 from .account_creator import PixVerseAccountCreator
 from .video_generator import PixVerseVideoGenerator
 from .video_downloader import PixVerseVideoDownloader
+from .pipeline import parse_prompts, calculate_batches, AccountPipelineWorker
 
 __all__ = [
     "is_connected",
@@ -20,4 +21,7 @@ __all__ = [
     "PixVerseAccountCreator",
     "PixVerseVideoGenerator",
     "PixVerseVideoDownloader",
+    "parse_prompts",
+    "calculate_batches",
+    "AccountPipelineWorker",
 ]

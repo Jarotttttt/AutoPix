@@ -1,12 +1,12 @@
 from datetime import datetime
+import math
 import os
+from tkinter import filedialog
 import customtkinter as ctk
 import tksvg
 
 from config import resource_path
-from ui.tab_account import TabAccount
-from ui.tab_download import TabDownload
-from ui.tab_generate import TabGenerate
+from core.pipeline import parse_prompts
 from ui.theme import (
     ACCENT_BLUE,
     BG_COLOR,
@@ -16,7 +16,9 @@ from ui.theme import (
     FONT_MONO,
     GREEN_COLOR,
     PURPLE_COLOR,
+    PURPLE_HOVER,
     RED_COLOR,
+    RED_HOVER,
     TEXT_MAIN,
     TEXT_MUTED,
     WARNING_COLOR,
@@ -27,22 +29,22 @@ ctk.set_default_color_theme("blue")
 
 
 class AppUI:
-    """Master UI Layout for AutoPix (Sidebar Navigation + Switchable Tabs + Live Monitor)."""
+    """Unified Single-Page Dashboard for AutoPix (Input -> Auto Accounts -> Render -> Download)."""
 
     def __init__(
         self,
         window: ctk.CTk,
         app_name: str,
         app_version: str,
-        count_var: ctk.StringVar,
         status_var: ctk.StringVar,
         default_folder: str,
-        callbacks: dict,
+        on_start,
+        on_stop,
     ):
         self.window = window
         self.window.title(f"{app_name} | {app_version}")
-        self.window.geometry("1100x720")
-        self.window.minsize(950, 620)
+        self.window.geometry("1180x760")
+        self.window.minsize(980, 640)
         self.window.configure(fg_color=BG_COLOR)
 
         try:
@@ -51,21 +53,21 @@ class AppUI:
             pass
 
         self.status_var = status_var
-        self.current_tab = "akun"
+        self.download_folder = default_folder
+        self.on_start = on_start
+        self.on_stop = on_stop
 
-        self._build_sidebar(app_name, app_version)
-        self._build_main_content(count_var, default_folder, callbacks)
-        self._build_monitor()
+        self._build_header(app_name, app_version)
+        self._build_stats_row()
+        self._build_main_workspace()
         self._tick_clock()
-
-        self.select_tab("akun")
 
     def _tick_clock(self):
         self.clock_label.configure(text=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         self.window.after(1000, self._tick_clock)
 
     def log(self, message: str):
-        """Thread-safe append to the activity monitor log."""
+        """Append entry to activity monitor log."""
         ts = datetime.now().strftime("%H:%M:%S")
         self.log_box.configure(state="normal")
         self.log_box.insert("end", f"[{ts}] {message}\n")
@@ -84,171 +86,236 @@ class AppUI:
         }
         self.status_badge.configure(fg_color=color_map.get(text, ACCENT_BLUE))
 
-    def _build_sidebar(self, app_name: str, app_version: str):
-        self.window.grid_columnconfigure(1, weight=1)
-        self.window.grid_rowconfigure(0, weight=1)
+    def _build_header(self, app_name: str, app_version: str):
+        self.window.grid_columnconfigure(0, weight=1)
 
-        sidebar = ctk.CTkFrame(self.window, fg_color=CARD_BG, corner_radius=0, width=220)
-        sidebar.grid(row=0, column=0, sticky="ns")
-        sidebar.grid_rowconfigure(5, weight=1)
+        header = ctk.CTkFrame(self.window, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(24, 16))
+        header.grid_columnconfigure(1, weight=1)
+
+        # Brand box
+        brand_frame = ctk.CTkFrame(header, fg_color="transparent")
+        brand_frame.grid(row=0, column=0, sticky="w")
 
         ctk.CTkLabel(
-            sidebar,
-            text=app_name.upper(),
-            font=ctk.CTkFont(family=FONT_MAIN, size=20, weight="bold"),
+            brand_frame,
+            text=f"🎬 {app_name.upper()}",
+            font=ctk.CTkFont(family=FONT_MAIN, size=22, weight="bold"),
             text_color=TEXT_MAIN,
-        ).grid(row=0, column=0, padx=20, pady=(24, 2), sticky="w")
+        ).pack(side="left")
 
         ctk.CTkLabel(
-            sidebar,
-            text=f"{app_version}",
+            brand_frame,
+            text=f" {app_version}",
             font=ctk.CTkFont(family=FONT_MAIN, size=12, weight="bold"),
             text_color=PURPLE_COLOR,
-        ).grid(row=1, column=0, padx=20, pady=(0, 32), sticky="w")
+        ).pack(side="left", padx=(4, 0), pady=(4, 0))
 
-        # Load SVG Icons
-        try:
-            self.svg_user = tksvg.SvgImage(file=resource_path("assets/user.svg"), scaletowidth=18)
-        except Exception:
-            self.svg_user = None
-
-        try:
-            self.svg_video = tksvg.SvgImage(file=resource_path("assets/video.svg"), scaletowidth=18)
-        except Exception:
-            self.svg_video = None
-
-        try:
-            self.svg_dl = tksvg.SvgImage(file=resource_path("assets/download.svg"), scaletowidth=18)
-        except Exception:
-            self.svg_dl = None
-
-        btn_font = ctk.CTkFont(family=FONT_MAIN, size=13, weight="bold")
-
-        self.btn_akun = ctk.CTkButton(
-            sidebar,
-            text="  Buat Akun",
-            image=self.svg_user,
-            anchor="w",
-            fg_color="transparent",
-            text_color=TEXT_MUTED,
-            hover_color="#222226",
-            command=lambda: self.select_tab("akun"),
-            font=btn_font,
-            height=40,
-        )
-        self.btn_akun.grid(row=2, column=0, sticky="ew", padx=12, pady=4)
-
-        self.btn_gen = ctk.CTkButton(
-            sidebar,
-            text="  Generate Video",
-            image=self.svg_video,
-            anchor="w",
-            fg_color="transparent",
-            text_color=TEXT_MUTED,
-            hover_color="#222226",
-            command=lambda: self.select_tab("gen"),
-            font=btn_font,
-            height=40,
-        )
-        self.btn_gen.grid(row=3, column=0, sticky="ew", padx=12, pady=4)
-
-        self.btn_dl = ctk.CTkButton(
-            sidebar,
-            text="  Download",
-            image=self.svg_dl,
-            anchor="w",
-            fg_color="transparent",
-            text_color=TEXT_MUTED,
-            hover_color="#222226",
-            command=lambda: self.select_tab("dl"),
-            font=btn_font,
-            height=40,
-        )
-        self.btn_dl.grid(row=4, column=0, sticky="ew", padx=12, pady=4)
+        # Right side: Status Badge + Clock
+        right_header = ctk.CTkFrame(header, fg_color="transparent")
+        right_header.grid(row=0, column=1, sticky="e")
 
         self.status_badge = ctk.CTkLabel(
-            sidebar,
+            right_header,
             textvariable=self.status_var,
             font=ctk.CTkFont(family=FONT_MAIN, size=11, weight="bold"),
             text_color="#FFFFFF",
             fg_color=ACCENT_BLUE,
             corner_radius=6,
             height=28,
+            padx=14,
         )
-        self.status_badge.grid(row=5, column=0, sticky="sw", padx=20, pady=(0, 8))
+        self.status_badge.pack(side="left", padx=(0, 14))
 
         self.clock_label = ctk.CTkLabel(
-            sidebar,
+            right_header,
             text="",
-            font=ctk.CTkFont(family=FONT_MONO, size=12),
+            font=ctk.CTkFont(family=FONT_MONO, size=13, weight="bold"),
             text_color=TEXT_MUTED,
         )
-        self.clock_label.grid(row=6, column=0, sticky="sw", padx=20, pady=(0, 24))
+        self.clock_label.pack(side="left")
 
-        self.nav_btns = {
-            "akun": self.btn_akun,
-            "gen": self.btn_gen,
-            "dl": self.btn_dl,
-        }
+    def _build_stats_row(self):
+        stats_frame = ctk.CTkFrame(self.window, fg_color="transparent")
+        stats_frame.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 18))
+        stats_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
-    def _build_main_content(self, count_var: ctk.StringVar, default_folder: str, callbacks: dict):
-        self.content_container = ctk.CTkFrame(self.window, fg_color="transparent")
-        self.content_container.grid(row=0, column=1, sticky="nsew", padx=24, pady=24)
-        self.content_container.grid_columnconfigure(0, weight=4)
-        self.content_container.grid_columnconfigure(1, weight=5)
-        self.content_container.grid_rowconfigure(0, weight=1)
+        self.stat_prompts = self._build_stat_card(stats_frame, 0, "PROMPT TERDETEKSI", "0", TEXT_MAIN)
+        self.stat_accounts = self._build_stat_card(stats_frame, 1, "AKUN DIBUTUHKAN", "0", PURPLE_COLOR)
+        self.stat_accounts_done = self._build_stat_card(stats_frame, 2, "AKUN SELESAI", "0", ACCENT_BLUE)
+        self.stat_videos_done = self._build_stat_card(stats_frame, 3, "VIDEO DIUNDUH", "0", GREEN_COLOR)
 
-        self.tab_akun = TabAccount(
-            self.content_container,
-            count_var=count_var,
-            on_start=callbacks["start_account"],
-            on_stop=callbacks["stop_account"],
+    def _build_stat_card(self, parent, col: int, title: str, value: str, color: str):
+        card = ctk.CTkFrame(
+            parent,
+            fg_color=CARD_BG,
+            corner_radius=12,
+            border_color=BORDER_COLOR,
+            border_width=1,
         )
+        card.grid(row=0, column=col, sticky="ew", padx=4)
 
-        self.tab_gen = TabGenerate(
-            self.content_container,
-            on_start_gen=callbacks["start_gen"],
-            on_stop_gen=callbacks["stop_gen"],
+        ctk.CTkLabel(
+            card,
+            text=title,
+            font=ctk.CTkFont(family=FONT_MAIN, size=11, weight="bold"),
+            text_color=TEXT_MUTED,
+        ).pack(pady=(12, 2))
+
+        lbl = ctk.CTkLabel(
+            card,
+            text=value,
+            font=ctk.CTkFont(family=FONT_MONO, size=26, weight="bold"),
+            text_color=color,
         )
+        lbl.pack(pady=(0, 12))
+        return lbl
 
-        self.tab_dl = TabDownload(
-            self.content_container,
-            default_folder=default_folder,
-            on_pick_folder=callbacks["pick_folder"],
-            on_start_download=callbacks["start_download"],
-        )
+    def _build_main_workspace(self):
+        self.window.grid_rowconfigure(2, weight=1)
 
-        self.tabs = {
-            "akun": self.tab_akun,
-            "gen": self.tab_gen,
-            "dl": self.tab_dl,
-        }
+        workspace = ctk.CTkFrame(self.window, fg_color="transparent")
+        workspace.grid(row=2, column=0, sticky="nsew", padx=28, pady=(0, 24))
+        workspace.grid_columnconfigure(0, weight=5)  # Input Prompt & Config (50%)
+        workspace.grid_columnconfigure(1, weight=5)  # Log Monitor (50%)
+        workspace.grid_rowconfigure(0, weight=1)
 
-    def _build_monitor(self):
-        monitor_frame = ctk.CTkFrame(
-            self.content_container,
+        # ── LEFT PANEL: PROMPT INPUT & CONTROL ──
+        left_panel = ctk.CTkFrame(
+            workspace,
             fg_color=CARD_BG,
             corner_radius=16,
             border_color=BORDER_COLOR,
             border_width=1,
         )
-        monitor_frame.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
-        monitor_frame.grid_columnconfigure(0, weight=1)
-        monitor_frame.grid_rowconfigure(2, weight=1)
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        left_panel.grid_columnconfigure(0, weight=1)
+        left_panel.grid_rowconfigure(1, weight=1)
 
-        hdr = ctk.CTkFrame(monitor_frame, fg_color="transparent")
-        hdr.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 8))
-        hdr.grid_columnconfigure(1, weight=1)
+        # Panel Header
+        left_hdr = ctk.CTkFrame(left_panel, fg_color="transparent")
+        left_hdr.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 8))
+        left_hdr.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
-            hdr,
-            text="Log Aktivitas",
+            left_hdr,
+            text="Daftar Prompt Video",
+            font=ctk.CTkFont(family=FONT_MAIN, size=13, weight="bold"),
+            text_color=TEXT_MAIN,
+        ).grid(row=0, column=0, sticky="w")
+
+        self.prompt_calc_lbl = ctk.CTkLabel(
+            left_hdr,
+            text="0 prompt (0 akun)",
+            font=ctk.CTkFont(family=FONT_MAIN, size=11, weight="bold"),
+            text_color=PURPLE_COLOR,
+        )
+        self.prompt_calc_lbl.grid(row=0, column=1, sticky="e")
+
+        # Textarea
+        self.prompt_box = ctk.CTkTextbox(
+            left_panel,
+            fg_color=BG_COLOR,
+            border_color=BORDER_COLOR,
+            border_width=1,
+            text_color=TEXT_MAIN,
+            corner_radius=10,
+            font=ctk.CTkFont(family=FONT_MAIN, size=12),
+        )
+        self.prompt_box.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 14))
+        self.prompt_box.insert(
+            "1.0",
+            "Drone shot kota futuristik saat matahari terbenam\n\n"
+            "Close-up tangan robotik menyentuh tangan manusia\n\n"
+            "Eksplorasi terumbu karang bercahaya di dasar laut",
+        )
+        self.prompt_box.bind("<KeyRelease>", self._on_prompt_type)
+
+        # Folder row
+        folder_row = ctk.CTkFrame(left_panel, fg_color="transparent")
+        folder_row.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 16))
+        folder_row.grid_columnconfigure(0, weight=1)
+
+        self.folder_lbl = ctk.CTkLabel(
+            folder_row,
+            text=f"📁 Folder: {self._truncate_path(self.download_folder)}",
+            font=ctk.CTkFont(family=FONT_MONO, size=11),
+            text_color=TEXT_MUTED,
+            anchor="w",
+        )
+        self.folder_lbl.grid(row=0, column=0, sticky="w")
+
+        pick_btn = ctk.CTkButton(
+            folder_row,
+            text="Pilih Folder",
+            command=self._pick_folder,
+            width=90,
+            height=28,
+            corner_radius=6,
+            fg_color="#222226",
+            hover_color="#2d2d33",
+            text_color=TEXT_MAIN,
+            font=ctk.CTkFont(family=FONT_MAIN, size=11, weight="bold"),
+        )
+        pick_btn.grid(row=0, column=1, sticky="e")
+
+        # Action Buttons (Mulai & Berhenti)
+        action_row = ctk.CTkFrame(left_panel, fg_color="transparent")
+        action_row.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 20))
+        action_row.grid_columnconfigure((0, 1), weight=1)
+
+        self.start_btn = ctk.CTkButton(
+            action_row,
+            text="🚀 MULAI PROSES OTOMATIS",
+            command=self.on_start,
+            fg_color=PURPLE_COLOR,
+            hover_color=PURPLE_HOVER,
+            text_color="#FFFFFF",
+            height=46,
+            corner_radius=10,
+            font=ctk.CTkFont(family=FONT_MAIN, size=13, weight="bold"),
+        )
+        self.start_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        self.stop_btn = ctk.CTkButton(
+            action_row,
+            text="BERHENTI",
+            command=self.on_stop,
+            fg_color=RED_COLOR,
+            hover_color=RED_HOVER,
+            text_color="#FFFFFF",
+            height=46,
+            corner_radius=10,
+            state="disabled",
+            font=ctk.CTkFont(family=FONT_MAIN, size=13, weight="bold"),
+        )
+        self.stop_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        # ── RIGHT PANEL: LOG & MONITOR ──
+        right_panel = ctk.CTkFrame(
+            workspace,
+            fg_color=CARD_BG,
+            corner_radius=16,
+            border_color=BORDER_COLOR,
+            border_width=1,
+        )
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        right_panel.grid_columnconfigure(0, weight=1)
+        right_panel.grid_rowconfigure(2, weight=1)
+
+        right_hdr = ctk.CTkFrame(right_panel, fg_color="transparent")
+        right_hdr.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 8))
+        right_hdr.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            right_hdr,
+            text="Log Aktivitas & Monitor",
             font=ctk.CTkFont(family=FONT_MAIN, size=13, weight="bold"),
             text_color=TEXT_MAIN,
         ).grid(row=0, column=0, sticky="w")
 
         self.progress_pct = ctk.CTkLabel(
-            hdr,
+            right_hdr,
             text="0%",
             font=ctk.CTkFont(family=FONT_MONO, size=13, weight="bold"),
             text_color=PURPLE_COLOR,
@@ -256,7 +323,7 @@ class AppUI:
         self.progress_pct.grid(row=0, column=1, sticky="e")
 
         self.progress_bar = ctk.CTkProgressBar(
-            monitor_frame,
+            right_panel,
             progress_color=PURPLE_COLOR,
             fg_color=BG_COLOR,
             height=10,
@@ -266,7 +333,7 @@ class AppUI:
         self.progress_bar.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 16))
 
         self.log_box = ctk.CTkTextbox(
-            monitor_frame,
+            right_panel,
             fg_color=BG_COLOR,
             text_color="#E4E4E7",
             border_color=BORDER_COLOR,
@@ -276,15 +343,36 @@ class AppUI:
             corner_radius=12,
         )
         self.log_box.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 20))
-        self.log_box.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] Sistem Siap.\n")
+        self.log_box.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] Sistem AutoPix Siap.\n")
         self.log_box.configure(state="disabled")
 
-    def select_tab(self, tab_name: str):
-        self.current_tab = tab_name
-        for name, frame in self.tabs.items():
-            if name == tab_name:
-                frame.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
-                self.nav_btns[name].configure(fg_color=PURPLE_COLOR, text_color="#FFFFFF")
-            else:
-                frame.grid_forget()
-                self.nav_btns[name].configure(fg_color="transparent", text_color=TEXT_MUTED)
+        # Initial prompt calc update
+        self._on_prompt_type(None)
+
+    def _on_prompt_type(self, event):
+        raw = self.prompt_box.get("1.0", "end-1c")
+        prompts = parse_prompts(raw)
+        n = len(prompts)
+        accs = math.ceil(n / 3) if n > 0 else 0
+        self.prompt_calc_lbl.configure(text=f"{n} prompt ({accs} akun)")
+        self.stat_prompts.configure(text=str(n))
+        self.stat_accounts.configure(text=str(accs))
+
+    def _pick_folder(self):
+        folder = filedialog.askdirectory(
+            title="Pilih Folder Penyimpanan Video",
+            initialdir=self.download_folder,
+        )
+        if folder:
+            self.download_folder = folder
+            self.folder_lbl.configure(text=f"📁 Folder: {self._truncate_path(folder)}")
+            self.log(f"Folder penyimpanan diubah: {folder}")
+
+    @staticmethod
+    def _truncate_path(path: str, max_len: int = 40) -> str:
+        if len(path) <= max_len:
+            return path
+        parts = path.replace("\\", "/").split("/")
+        if len(parts) <= 2:
+            return path
+        return parts[0] + "/.../" + "/".join(parts[-2:])

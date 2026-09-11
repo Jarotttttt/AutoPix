@@ -9,11 +9,9 @@ hiddenimports = [
     'core.account_creator',
     'core.video_generator',
     'core.video_downloader',
+    'core.pipeline',
     'ui',
     'ui.theme',
-    'ui.tab_account',
-    'ui.tab_generate',
-    'ui.tab_download',
     'ui.app_ui',
     'config',
 ]
