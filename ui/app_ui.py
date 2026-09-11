@@ -259,9 +259,25 @@ class AppUI:
         )
         pick_btn.grid(row=0, column=1, sticky="e")
 
+        # Background mode switch row
+        opt_row = ctk.CTkFrame(left_panel, fg_color="transparent")
+        opt_row.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 16))
+        opt_row.grid_columnconfigure(0, weight=1)
+
+        self.bg_mode_var = ctk.BooleanVar(value=True)
+        self.bg_switch = ctk.CTkSwitch(
+            opt_row,
+            text="Jalankan di Latar Belakang (Sembunyikan Browser)",
+            variable=self.bg_mode_var,
+            font=ctk.CTkFont(family=FONT_MAIN, size=12, weight="bold"),
+            text_color=TEXT_MAIN,
+            progress_color=PURPLE_COLOR,
+        )
+        self.bg_switch.grid(row=0, column=0, sticky="w")
+
         # Action Buttons (Mulai & Berhenti)
         action_row = ctk.CTkFrame(left_panel, fg_color="transparent")
-        action_row.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 20))
+        action_row.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 20))
         action_row.grid_columnconfigure((0, 1), weight=1)
 
         self.start_btn = ctk.CTkButton(

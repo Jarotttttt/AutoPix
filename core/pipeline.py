@@ -59,6 +59,7 @@ class AccountPipelineWorker:
         on_account_created: Optional[Callable[[dict], None]] = None,
         on_video_generated: Optional[Callable[[], None]] = None,
         on_video_downloaded: Optional[Callable[[], None]] = None,
+        run_in_background: bool = False,
     ):
         self.index = account_index
         self.prompts = prompts
@@ -69,6 +70,7 @@ class AccountPipelineWorker:
         self.on_account_created = on_account_created
         self.on_video_generated = on_video_generated
         self.on_video_downloaded = on_video_downloaded
+        self.run_in_background = run_in_background
 
     def _is_stopped(self) -> bool:
         return bool(self.stop_check and self.stop_check())
@@ -86,6 +88,7 @@ class AccountPipelineWorker:
             log_callback=self.log,
             stop_check=self.stop_check,
             driver_opened_callback=self.driver_tracker,
+            run_in_background=self.run_in_background,
         )
 
         ok, email, driver = creator.create_account(self.index, password)
