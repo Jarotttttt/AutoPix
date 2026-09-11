@@ -102,7 +102,6 @@ class AutoPixApp:
         batches = calculate_batches(prompts, max_per_account=3)
         total_accounts = len(batches)
         total_prompts = len(prompts)
-        run_in_background = bool(self.ui.bg_mode_var.get())
 
         self.running = True
         self.stop_requested = False
@@ -120,14 +119,13 @@ class AutoPixApp:
         self.ui.progress_bar.set(0)
         self.ui.progress_pct.configure(text="0%")
 
-        mode_str = "latar belakang (senyap)" if run_in_background else "jendela terlihat"
         self.ui.log(
-            f"Memulai pipeline otomatis [{mode_str}]: {total_prompts} prompt terbagi ke dalam {total_accounts} akun (maks 3 video/akun)..."
+            f"Memulai pipeline otomatis: {total_prompts} prompt terbagi ke dalam {total_accounts} akun (maks 3 video/akun)..."
         )
 
         threading.Thread(
             target=self._pipeline_worker,
-            args=(batches, total_prompts, run_in_background),
+            args=(batches, total_prompts),
             daemon=True,
         ).start()
 
@@ -149,7 +147,7 @@ class AutoPixApp:
         self._safe_ui(self.ui.start_btn.configure, state="normal")
         self._safe_ui(self.ui.log, f"Pipeline dihentikan. {closed} browser aktif ditutup.")
 
-    def _pipeline_worker(self, batches: list, total_prompts: int, run_in_background: bool = True):
+    def _pipeline_worker(self, batches: list, total_prompts: int):
         accounts_done = 0
         videos_downloaded = 0
         total_accounts = len(batches)
@@ -188,7 +186,6 @@ class AutoPixApp:
                 driver_tracker_callback=self._track_driver,
                 on_account_created=on_acc_created,
                 on_video_downloaded=on_video_download,
-                run_in_background=run_in_background,
             )
 
             try:

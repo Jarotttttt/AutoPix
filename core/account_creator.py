@@ -134,12 +134,10 @@ class PixVerseAccountCreator:
         log_callback: Optional[Callable[[str], None]] = None,
         stop_check: Optional[Callable[[], bool]] = None,
         driver_opened_callback: Optional[Callable[[Driver], None]] = None,
-        run_in_background: bool = False,
     ):
         self.log = log_callback or print
         self.stop_check = stop_check
         self.driver_opened_callback = driver_opened_callback
-        self.run_in_background = run_in_background
         self.session = requests.Session()
 
     def _stopped(self) -> bool:
@@ -148,11 +146,6 @@ class PixVerseAccountCreator:
     def _make_driver(self) -> Driver:
         driver = Driver(uc=True, headless=False)
         driver.set_window_size(1280, 720)
-        if self.run_in_background:
-            try:
-                driver.set_window_position(-3000, -3000)
-            except Exception:
-                pass
         return driver
 
     def _wait_for_registration_form(self, driver, timeout: int = 15) -> bool:
