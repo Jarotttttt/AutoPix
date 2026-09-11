@@ -1,26 +1,26 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-.venv/
-venv/
-
-# Environment
-.env
-.env.local
-
-# Build / Dist
+# Build & packaging output
 dist/
 build/
+*.pyc
+*.pyo
+__pycache__/
 
-# OS
-.DS_Store
-Thumbs.db
+# Downloads & local runs
+downloads/
+downloaded_files/
+*.mp4
+*.lock
+*.log
 
-# IDE
-.vscode/
+# IDE & Editor
 .idea/
+.vscode/
+*.swp
+*.swo
 
-# Runtime
-node_modules/
+# OS files
+Thumbs.db
+.DS_Store
+
+# Temp
+*.tmp

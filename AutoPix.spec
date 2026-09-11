@@ -1,14 +1,32 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('ai.ico', '.')]
+datas = [('ai.ico', '.'), ('assets', 'assets')]
 binaries = []
-hiddenimports = []
-tmp_ret = collect_all('customtkinter')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('seleniumbase')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+hiddenimports = [
+    'core',
+    'core.mail_service',
+    'core.account_creator',
+    'core.video_generator',
+    'core.video_downloader',
+    'ui',
+    'ui.theme',
+    'ui.tab_account',
+    'ui.tab_generate',
+    'ui.tab_download',
+    'ui.app_ui',
+    'config',
+]
 
+tmp_ret = collect_all('tksvg')
+datas += tmp_ret[0]
+binaries += tmp_ret[1]
+hiddenimports += tmp_ret[2]
+
+tmp_ret = collect_all('customtkinter')
+datas += tmp_ret[0]
+binaries += tmp_ret[1]
+hiddenimports += tmp_ret[2]
 
 a = Analysis(
     ['main.py'],
@@ -31,7 +49,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='main',
+    name='AutoPix',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
