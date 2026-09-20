@@ -3,22 +3,30 @@ import sys
 
 # ── App Metadata ─────────────────────────────────────────────────────────────
 APP_NAME = "AutoPix"
-APP_VERSION = "v3.0"
-APP_ID = "autopixverse.app.1.0"
+APP_VERSION = "v4.0"
+APP_ID = "autopix.pixverse.flow.4.0"
 
 # ── Service Endpoints ────────────────────────────────────────────────────────
-TEMP_MAIL_API_BASE = "https://temp-mail.ai/api/mailbox"
-PIXVERSE_REG_URL = "https://app.pixverse.ai/register"
-PIXVERSE_VIDEO_URL = "https://app.pixverse.ai/creation/video"
+# Temp mail provider: temp.tf (clean rotated domains / EDU / Outlook / Gmail)
+TEMP_TF_BASE_URL = "https://temp.tf"
+TEMP_TF_ACCOUNT_API = f"{TEMP_TF_BASE_URL}/api/account"
+TEMP_TF_CHECK_API = f"{TEMP_TF_BASE_URL}/api/check"
+
+# PixVerse Endpoints
 PIXVERSE_HOME_URL = "https://app.pixverse.ai/"
+PIXVERSE_REG_URL = "https://app.pixverse.ai/register"
+PIXVERSE_LOGIN_URL = "https://app.pixverse.ai/login"
+PIXVERSE_VIDEO_URL = "https://app.pixverse.ai/creation/video"
 
 # ── Automation Settings & Delays ─────────────────────────────────────────────
-EMAIL_WAIT_TIMEOUT = 90
-BROWSER_LAUNCH_STAGGER_DELAY = 2.5
+EMAIL_WAIT_TIMEOUT = 120  # seconds to wait for verification code
+EMAIL_POLL_INTERVAL = 3   # seconds between inbox polling
+REGISTRATION_TIMEOUT = 25 # seconds waiting for form elements
+MAX_VIDEOS_PER_ACCOUNT = 3 # Free quota per fresh PixVerse account
 CONCURRENT_LIMIT_MAX_RETRIES = 3
-CONCURRENT_LIMIT_WAIT_SECONDS = 45
+CONCURRENT_LIMIT_WAIT_SECONDS = 40
 
-# ── Default Paths ────────────────────────────────────────────────────────────
+# ── Paths ────────────────────────────────────────────────────────────────────
 DEFAULT_DOWNLOAD_FOLDER = "downloads"
 
 

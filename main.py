@@ -2,6 +2,7 @@ import ctypes
 import os
 import threading
 from tkinter import messagebox
+from typing import List
 
 import customtkinter as ctk
 
@@ -10,16 +11,14 @@ from config import (
     APP_NAME,
     APP_VERSION,
     DEFAULT_DOWNLOAD_FOLDER,
+    MAX_VIDEOS_PER_ACCOUNT,
+    resource_path,
 )
-from core import (
-    AccountPipelineWorker,
-    calculate_batches,
-    is_connected,
-    parse_prompts,
-)
+from core import AccountPipelineWorker, calculate_batches
 from ui import AppUI
+from utils import AppLogger, is_connected
 
-# Windows Taskbar Icon AppUserModelID
+# Set explicit Windows Taskbar Application Model ID
 try:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
 except Exception:
@@ -27,38 +26,57 @@ except Exception:
 
 
 class AutoPixApp:
-    """Master Application Controller for AutoPix: Prompt-to-Video Automatic Pipeline."""
+    """Master Application Controller for AutoPix AMOLED Glass Edition."""
 
     def __init__(self):
         self.window = ctk.CTk()
 
-        # State Variables
-        self.status_var = ctk.StringVar(value="STANDBY")
+        # Set App Icon if exists
+        icon_file = resource_path("ai.ico")
+        if os.path.exists(icon_file):
+            try:
+                self.window.iconbitmap(icon_file)
+            except Exception:
+                pass
+
+        # Execution State
         self.default_folder = os.path.join(
             os.path.abspath(os.path.dirname(__file__)),
             DEFAULT_DOWNLOAD_FOLDER,
         )
+        os.makedirs(self.default_folder, exist_ok=True)
 
         self.running = False
         self.stop_requested = False
         self.active_drivers = []
         self.drivers_lock = threading.Lock()
 
+        # Stats Counters
+        self.total_accounts = 0
+        self.created_accounts = 0
+        self.generated_videos = 0
+        self.downloaded_videos = 0
+
+        # Build AMOLED Glass UI
         self.ui = AppUI(
-            self.window,
-            app_name=APP_NAME,
-            app_version=APP_VERSION,
-            status_var=self.status_var,
+            window=self.window,
             default_folder=self.default_folder,
             on_start=self.start_pipeline,
             on_stop=self.stop_pipeline,
         )
 
+        # Connect Logger to AMOLED Terminal
+        self.logger = AppLogger(callback=self._log_to_ui)
+
+        # Window Close Protocol
         self.window.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
     def _safe_ui(self, fn, *args, **kwargs):
-        """Invoke a function on the main Tkinter thread safely."""
+        """Safely invoke widget update on the main Tkinter thread."""
         self.window.after(0, lambda: fn(*args, **kwargs))
+
+    def _log_to_ui(self, formatted_message: str, level: str):
+        self._safe_ui(self.ui.log_terminal.append_log, formatted_message, level)
 
     def _track_driver(self, driver):
         with self.drivers_lock:
@@ -79,19 +97,17 @@ class AutoPixApp:
                 pass
         return closed
 
-    # ── PIPELINE EXECUTION ───────────────────────────────────────────────────
+    # ── PIPELINE FLOW ────────────────────────────────────────────────────────
 
     def start_pipeline(self):
         if self.running:
             return
 
         if not is_connected():
-            messagebox.showerror("No Internet", "Koneksi internet tidak terdeteksi.")
+            messagebox.showerror("No Internet", "Koneksi internet tidak terdeteksi. Periksa jaringan Anda.")
             return
 
-        raw_text = self.ui.prompt_box.get("1.0", "end-1c")
-        prompts = parse_prompts(raw_text)
-
+        prompts = self.ui.prompt_editor.get_prompts()
         if not prompts:
             messagebox.showwarning(
                 "Prompt Kosong",
@@ -99,33 +115,27 @@ class AutoPixApp:
             )
             return
 
-        batches = calculate_batches(prompts, max_per_account=3)
-        total_accounts = len(batches)
-        total_prompts = len(prompts)
+        dest_folder = self.ui.folder_var.get().strip() or self.default_folder
+        os.makedirs(dest_folder, exist_ok=True)
+
+        batches = calculate_batches(prompts, max_per_account=MAX_VIDEOS_PER_ACCOUNT)
+        self.total_accounts = len(batches)
+        self.created_accounts = 0
+        self.generated_videos = 0
+        self.downloaded_videos = 0
 
         self.running = True
         self.stop_requested = False
+        self.ui.set_running_state(True)
+        self.ui.stats_bar.update_stats(0, 0, 0)
 
-        # Reset Stats & UI Controls
-        self.ui.start_btn.configure(state="disabled")
-        self.ui.stop_btn.configure(state="normal")
-        self.ui.set_status("RUNNING")
-
-        self.ui.stat_prompts.configure(text=str(total_prompts))
-        self.ui.stat_accounts.configure(text=str(total_accounts))
-        self.ui.stat_accounts_done.configure(text="0")
-        self.ui.stat_videos_done.configure(text="0")
-
-        self.ui.progress_bar.set(0)
-        self.ui.progress_pct.configure(text="0%")
-
-        self.ui.log(
-            f"Memulai pipeline otomatis: {total_prompts} prompt terbagi ke dalam {total_accounts} akun (maks 3 video/akun)..."
+        self.logger.info(
+            f"Memulai pipeline: {len(prompts)} prompt dibagi ke dalam {self.total_accounts} akun (maks {MAX_VIDEOS_PER_ACCOUNT} per akun)."
         )
 
         threading.Thread(
-            target=self._pipeline_worker,
-            args=(batches, total_prompts),
+            target=self._worker_thread,
+            args=(batches, dest_folder, len(prompts)),
             daemon=True,
         ).start()
 
@@ -134,36 +144,44 @@ class AutoPixApp:
             return
 
         self.stop_requested = True
+        self.logger.warn("Permintaan stop diterima. Menghentikan pipeline dan membersihkan browser...")
         self.ui.stop_btn.configure(state="disabled")
-        self.ui.set_status("STOPPING")
-        self.ui.log("Menghentikan pipeline & menutup browser aktif...")
 
         threading.Thread(target=self._stop_and_cleanup, daemon=True).start()
 
     def _stop_and_cleanup(self):
         closed = self._close_all_drivers()
         self.running = False
-        self._safe_ui(self.ui.set_status, "STOPPED")
-        self._safe_ui(self.ui.start_btn.configure, state="normal")
-        self._safe_ui(self.ui.log, f"Pipeline dihentikan. {closed} browser aktif ditutup.")
+        self._safe_ui(self.ui.set_running_state, False)
+        self.logger.warn(f"Pipeline dihentikan. {closed} browser aktif ditutup.")
 
-    def _pipeline_worker(self, batches: list, total_prompts: int):
-        accounts_done = 0
-        videos_downloaded = 0
-        total_accounts = len(batches)
-
+    def _worker_thread(self, batches: List[dict], dest_folder: str, total_prompts: int):
         def on_acc_created(acc_info):
-            nonlocal accounts_done
-            accounts_done += 1
-            self._safe_ui(self.ui.stat_accounts_done.configure, text=f"{accounts_done}/{total_accounts}")
+            self.created_accounts += 1
+            self._safe_ui(
+                self.ui.stats_bar.update_stats,
+                self.created_accounts,
+                self.generated_videos,
+                self.downloaded_videos,
+            )
 
-        def on_video_download():
-            nonlocal videos_downloaded
-            videos_downloaded += 1
-            self._safe_ui(self.ui.stat_videos_done.configure, text=f"{videos_downloaded}/{total_prompts}")
-            pct = min(1.0, videos_downloaded / total_prompts if total_prompts else 0)
-            self._safe_ui(self.ui.progress_bar.set, pct)
-            self._safe_ui(self.ui.progress_pct.configure, text=f"{int(pct * 100)}%")
+        def on_video_gen():
+            self.generated_videos += 1
+            self._safe_ui(
+                self.ui.stats_bar.update_stats,
+                self.created_accounts,
+                self.generated_videos,
+                self.downloaded_videos,
+            )
+
+        def on_video_dl():
+            self.downloaded_videos += 1
+            self._safe_ui(
+                self.ui.stats_bar.update_stats,
+                self.created_accounts,
+                self.generated_videos,
+                self.downloaded_videos,
+            )
 
         for batch in batches:
             if self.stop_requested:
@@ -172,47 +190,41 @@ class AutoPixApp:
             acc_idx = batch["account_index"]
             batch_prompts = batch["prompts"]
 
-            self._safe_ui(
-                self.ui.log,
-                f"--- Memproses Akun #{acc_idx} ({len(batch_prompts)} prompt) ---",
-            )
+            self.logger.info(f"--- Menjalankan Batch Akun #{acc_idx} ({len(batch_prompts)} prompt) ---")
 
             worker = AccountPipelineWorker(
                 account_index=acc_idx,
                 prompts=batch_prompts,
-                download_folder=self.ui.download_folder,
-                log_callback=lambda m: self._safe_ui(self.ui.log, m),
+                download_folder=dest_folder,
+                log_callback=self.logger.info,
                 stop_check=lambda: self.stop_requested,
                 driver_tracker_callback=self._track_driver,
                 on_account_created=on_acc_created,
-                on_video_downloaded=on_video_download,
+                on_video_generated=on_video_gen,
+                on_video_downloaded=on_video_dl,
             )
 
             try:
                 worker.run()
             except Exception as e:
-                self._safe_ui(self.ui.log, f"[Akun {acc_idx}] Error: {e}")
+                self.logger.error(f"[Akun #{acc_idx}] Terjadi kesalahan: {e}")
 
         self.running = False
-        self._safe_ui(self._on_pipeline_finished, videos_downloaded, total_prompts)
+        self._safe_ui(self._on_pipeline_completed, self.downloaded_videos, total_prompts, dest_folder)
 
-    def _on_pipeline_finished(self, downloaded: int, total: int):
-        self.ui.start_btn.configure(state="normal")
-        self.ui.stop_btn.configure(state="disabled")
+    def _on_pipeline_completed(self, downloaded: int, total: int, folder: str):
+        self.ui.set_running_state(False)
+        self._close_all_drivers()
 
         if self.stop_requested:
-            self.ui.set_status("STOPPED")
-            self.ui.log(f"Pipeline berhenti. Video diunduh: {downloaded}/{total}.")
+            self.logger.warn(f"Pipeline selesai dengan penghentian. Unduhan: {downloaded}/{total}.")
         else:
-            self.ui.set_status("DONE")
-            self.ui.progress_bar.set(1.0)
-            self.ui.progress_pct.configure(text="100%")
-            self.ui.log(f"🎉 Pipeline selesai! Total video berhasil diunduh: {downloaded}/{total}.")
+            self.logger.success(f"Pipeline tuntas 100%! Semua {downloaded}/{total} video berhasil diunduh.")
             messagebox.showinfo(
                 "AutoPix Selesai",
-                f"Proses otomatis selesai!\n\n"
-                f"Total Video Terunduh: {downloaded}/{total}\n"
-                f"Folder: {self.ui.download_folder}",
+                f"Seluruh proses otomatis selesai!\n\n"
+                f"Video Berhasil Diunduh: {downloaded}/{total}\n"
+                f"Tersimpan di: {folder}",
             )
 
     def _on_window_close(self):

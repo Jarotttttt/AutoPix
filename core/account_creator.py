@@ -2,20 +2,20 @@ import random
 import time
 from typing import Callable, Optional, Tuple
 
-import requests
-from config import EMAIL_WAIT_TIMEOUT, PIXVERSE_REG_URL
-from core.mail_service import check_inbox, extract_otp, get_temp_email, random_username
+from config import PIXVERSE_REG_URL, REGISTRATION_TIMEOUT
+from core.mail_service import TempTFMailService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import Driver
+from utils.helpers import random_password, random_username
 
 
 def react_fill(driver, element, value: str) -> str:
-    """Fill input field triggering React/Vue native setter and input/change events."""
+    """Fill input field triggering React/Vue synthetic events safely."""
     driver.execute_script("arguments[0].focus();", element)
-    time.sleep(0.3)
+    time.sleep(0.2)
     driver.execute_script("arguments[0].value = '';", element)
     driver.execute_script(
         """
@@ -27,7 +27,7 @@ def react_fill(driver, element, value: str) -> str:
         nativeInputValueSetter.call(el, val);
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
-    """,
+        """,
         element,
         value,
     )
@@ -47,18 +47,8 @@ def react_fill(driver, element, value: str) -> str:
 
 
 def fill_otp_inputs(driver, otp_code: str) -> bool:
-    """Find OTP input fields (single input or multi-box) and insert OTP."""
-    wait = WebDriverWait(driver, 15)
-    try:
-        el = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, 'input[placeholder="Verification code"]'))
-        )
-        if el.is_displayed():
-            react_fill(driver, el, otp_code)
-            return True
-    except Exception:
-        pass
-
+    """Find OTP input boxes (single input or multi-box) and type OTP code."""
+    # 1. Cek multi-box input (1 kotak per digit)
     otp_boxes = driver.find_elements(
         By.CSS_SELECTOR, 'input[maxlength="1"], input[data-index], .ant-otp input'
     )
@@ -70,17 +60,16 @@ def fill_otp_inputs(driver, otp_code: str) -> bool:
                 otp_boxes[i].click()
                 time.sleep(0.1)
                 otp_boxes[i].send_keys(char)
-                time.sleep(0.15)
+                time.sleep(0.1)
             except Exception:
                 pass
         return True
 
+    # 2. Cek single input verification code
     single_selectors = [
+        'input[placeholder*="Verification" i]',
         'input[placeholder*="code" i]',
-        'input[placeholder*="Code" i]',
         'input[placeholder*="OTP" i]',
-        'input[placeholder*="otp" i]',
-        'input[placeholder*="verification" i]',
         'input[type="number"][maxlength="6"]',
         'input[autocomplete="one-time-code"]',
     ]
@@ -98,110 +87,96 @@ def fill_otp_inputs(driver, otp_code: str) -> bool:
 
 
 def click_verify_button(driver) -> bool:
-    """Locate and click OTP verification submission button."""
-    try:
-        btn = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-        driver.execute_script("arguments[0].click();", btn)
-        return True
-    except Exception:
-        pass
-
-    fallback_selectors = [
+    """Click submit button on OTP verification step."""
+    btn_selectors = [
+        (By.CSS_SELECTOR, 'button[type="submit"]'),
         (By.XPATH, '//button[contains(., "Verify")]'),
         (By.XPATH, '//button[contains(., "Confirm")]'),
-        (By.XPATH, '//button[contains(., "Submit")]'),
         (By.XPATH, '//button[contains(., "Continue")]'),
-        (By.CSS_SELECTOR, 'button[type="submit"]'),
     ]
 
-    for by, sel in fallback_selectors:
+    for by, sel in btn_selectors:
         try:
-            btn = driver.find_element(by, sel)
-            if btn.is_displayed():
-                driver.execute_script("arguments[0].click();", btn)
-                return True
+            btns = driver.find_elements(by, sel)
+            for btn in btns:
+                if btn.is_displayed():
+                    driver.execute_script("arguments[0].click();", btn)
+                    return True
         except Exception:
             continue
 
     return False
 
 
-class PixVerseAccountCreator:
-    """Creates PixVerse accounts using undetected Chrome with temporary email verification."""
+class AccountCreatorService:
+    """Manages autonomous registration on PixVerse with Temp.tf email & UC driver."""
 
     def __init__(
         self,
         log_callback: Optional[Callable[[str], None]] = None,
         stop_check: Optional[Callable[[], bool]] = None,
-        driver_opened_callback: Optional[Callable[[Driver], None]] = None,
+        driver_tracker: Optional[Callable[[Driver], None]] = None,
     ):
         self.log = log_callback or print
         self.stop_check = stop_check
-        self.driver_opened_callback = driver_opened_callback
-        self.session = requests.Session()
+        self.driver_tracker = driver_tracker
+        self.mail_service = TempTFMailService()
 
-    def _stopped(self) -> bool:
+    def _is_stopped(self) -> bool:
         return bool(self.stop_check and self.stop_check())
 
-    def _make_driver(self) -> Driver:
+    def _create_driver(self) -> Driver:
         driver = Driver(uc=True, headless=False)
-        driver.set_window_size(1280, 720)
+        driver.set_window_size(1280, 800)
         return driver
-
-    def _wait_for_registration_form(self, driver, timeout: int = 15) -> bool:
-        try:
-            WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'input[placeholder="Username"]'))
-            )
-            return True
-        except Exception:
-            return False
 
     def create_account(
         self,
         index: int,
-        password: str,
         max_retries: int = 2,
     ) -> Tuple[bool, Optional[str], Optional[Driver]]:
         """
-        Execute full registration flow for a single account.
-        Returns (success, email, driver).
+        Creates a new verified PixVerse account.
+        Returns: (success, email, driver_instance)
         """
-        for attempt in range(max_retries + 1):
-            if self._stopped():
+        for attempt in range(1, max_retries + 2):
+            if self._is_stopped():
                 return False, None, None
 
             driver = None
             try:
-                driver = self._make_driver()
-                if self.driver_opened_callback:
-                    self.driver_opened_callback(driver)
+                self.log(f"[Akun #{index}] Membuka browser undetected (Percobaan {attempt})...")
+                driver = self._create_driver()
+                if self.driver_tracker:
+                    self.driver_tracker(driver)
 
-                # 1. Buka Halaman Registrasi
-                driver.uc_open_with_reconnect(PIXVERSE_REG_URL, reconnect_time=1)
+                # 1. Buka formulir registrasi PixVerse
+                driver.uc_open_with_reconnect(PIXVERSE_REG_URL, reconnect_time=2)
 
-                if not self._wait_for_registration_form(driver, timeout=15):
+                wait = WebDriverWait(driver, REGISTRATION_TIMEOUT)
+                form_present = False
+                try:
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[placeholder="Username"]')))
+                    form_present = True
+                except Exception:
+                    # Retry buka halaman jika kena Cloudflare interstitial
                     driver.refresh()
                     time.sleep(3)
-                    driver.uc_open_with_reconnect(PIXVERSE_REG_URL, reconnect_time=1)
-                    if not self._wait_for_registration_form(driver, timeout=15):
-                        raise Exception("Formulir pendaftaran tidak muncul setelah refresh")
+                    driver.uc_open_with_reconnect(PIXVERSE_REG_URL, reconnect_time=2)
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[placeholder="Username"]')))
+                    form_present = True
 
-                # 2. Dapatkan Email Sementara
-                email = get_temp_email(self.session)
-                if not email:
-                    raise Exception("Gagal mendapatkan email sementara")
+                if not form_present:
+                    raise RuntimeError("Formulir pendaftaran PixVerse gagal dimuat.")
 
-                username = random_username()
+                # 2. Dapatkan temp mail dari temp.tf (@high.edu.pl / Outlook)
+                self.log(f"[Akun #{index}] Mengambil email disposable dari temp.tf...")
+                email = self.mail_service.create_inbox()
+                username = random_username("user_")
+                password = random_password(12)
 
-                # 3. Isi Formulir Registrasi
-                WebDriverWait(driver, 30).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, 'input[placeholder="Username"]'))
-                )
-                time.sleep(1.5)
-
-                if self._stopped():
-                    raise Exception("Proses dihentikan pengguna")
+                self.log(f"[Akun #{index}] Mengisi data registrasi ({email})...")
+                time.sleep(1)
 
                 fields = [
                     ('input[placeholder="Username"]', username),
@@ -211,20 +186,20 @@ class PixVerseAccountCreator:
                 ]
 
                 for sel, val in fields:
-                    if self._stopped():
-                        raise Exception("Proses dihentikan pengguna")
-                    el = driver.find_element(By.CSS_SELECTOR, sel)
-                    react_fill(driver, el, val)
+                    if self._is_stopped():
+                        raise InterruptedError("Proses dibatalkan.")
+                    elem = driver.find_element(By.CSS_SELECTOR, sel)
+                    react_fill(driver, elem, val)
+                    time.sleep(0.1)
 
-                # 4. Klik Continue
+                # 3. Klik Continue / Submit
                 continue_btn = None
-                btn_selectors = [
+                btn_candidates = [
                     (By.XPATH, '//button[contains(., "Continue")]'),
                     (By.XPATH, '//button[.//span[contains(text(),"Continue")]]'),
                     (By.CSS_SELECTOR, 'button[type="submit"]'),
                 ]
-
-                for by, sel in btn_selectors:
+                for by, sel in btn_candidates:
                     try:
                         btn = driver.find_element(by, sel)
                         if btn.is_displayed():
@@ -234,74 +209,65 @@ class PixVerseAccountCreator:
                         continue
 
                 if not continue_btn:
-                    raise Exception("Tombol Continue tidak ditemukan")
-
-                if self._stopped():
-                    raise Exception("Proses dihentikan pengguna")
+                    raise RuntimeError("Tombol Continue tidak ditemukan pada form registrasi.")
 
                 driver.execute_script("arguments[0].click();", continue_btn)
 
-                # 5. Tunggu Halaman OTP
-                self.log(f"[Akun {index}] Menunggu kode OTP...")
-                msg = check_inbox(
-                    self.session,
-                    email,
-                    wait=EMAIL_WAIT_TIMEOUT,
+                # 4. Polling OTP dari temp.tf
+                self.log(f"[Akun #{index}] Menunggu kode OTP PixVerse masuk ke inbox...")
+                otp_code = self.mail_service.poll_for_otp(
+                    email=email,
                     stop_check=self.stop_check,
+                    log_callback=self.log,
                 )
-                if not msg:
-                    raise Exception("Timeout menunggu email OTP!")
+                self.log(f"[Akun #{index}] Kode OTP berhasil diperoleh: {otp_code}")
 
-                otp_code = extract_otp(msg)
-                if not otp_code:
-                    raise Exception("Gagal mengekstrak 6 digit OTP dari email!")
+                if self._is_stopped():
+                    raise InterruptedError("Proses dibatalkan.")
 
-                self.log(f"[Akun {index}] Kode OTP diterima: {otp_code}")
-
-                if self._stopped():
-                    raise Exception("Proses dihentikan pengguna")
-
-                # 6. Masukkan OTP & Verifikasi
-                if not fill_otp_inputs(driver, otp_code):
-                    raise Exception("Gagal memasukkan kode OTP ke halaman!")
-
+                # 5. Isi kode OTP & Verifikasi
                 time.sleep(1)
-                if self._stopped():
-                    raise Exception("Proses dihentikan pengguna")
+                if not fill_otp_inputs(driver, otp_code):
+                    raise RuntimeError("Gagal memasukkan kode OTP ke input.")
 
-                if not click_verify_button(driver):
-                    raise Exception("Tombol verifikasi tidak ditemukan!")
+                time.sleep(0.8)
+                click_verify_button(driver)
 
-                # 7. Tunggu Redirect ke Dashboard
-                login_success = False
-                for _ in range(20):
-                    if self._stopped():
-                        raise Exception("Proses dihentikan pengguna")
+                # 6. Verifikasi Login Sukses (Redirect dari form registrasi)
+                success = False
+                for _ in range(15):
+                    if self._is_stopped():
+                        raise InterruptedError("Proses dibatalkan.")
                     time.sleep(1)
-                    current_url = driver.current_url.lower()
-                    if any(kw in current_url for kw in ["home", "dashboard", "create", "studio", "app"]):
-                        if "register" not in current_url and "verify" not in current_url:
-                            login_success = True
+                    curr = driver.current_url.lower()
+                    if any(kw in curr for kw in ["home", "creation", "studio", "dashboard", "app.pixverse.ai"]):
+                        if "register" not in curr and "verify" not in curr:
+                            success = True
                             break
 
-                if login_success:
+                if success:
+                    self.log(f"[Akun #{index}] Registrasi & Verifikasi BERHASIL! ({email})")
                     return True, email, driver
                 else:
-                    raise Exception("Registrasi selesai tetapi redirect ke dashboard tidak terdeteksi")
+                    raise RuntimeError("Registrasi terkirim tapi redirect login tidak terdeteksi.")
 
             except Exception as e:
-                if self._stopped():
+                if self._is_stopped():
+                    if driver:
+                        try:
+                            driver.quit()
+                        except Exception:
+                            pass
                     return False, None, None
 
-                self.log(f"[Akun {index}] Percobaan {attempt + 1} gagal: {str(e)[:100]}")
+                self.log(f"[Akun #{index}] Percobaan {attempt} gagal: {e}")
                 if driver:
                     try:
                         driver.quit()
                     except Exception:
                         pass
 
-                if attempt == max_retries:
-                    return False, None, None
-                time.sleep(random.uniform(3, 7))
+                if attempt <= max_retries:
+                    time.sleep(random.uniform(3, 6))
 
         return False, None, None
