@@ -29,33 +29,29 @@ class TempTFMailService:
 
     def create_inbox(self) -> str:
         """
-        Request a real temporary Gmail address using dot and plus syntax.
-        Matches Node.js snippet: providers=gmail, dot=1, plus=1.
+        Request a fresh email address from temp.tf.
+        Uses high.edu.pl (unique random 10-char username, not shared dot variations).
         """
-        params = {
-            "providers": "gmail",
-            "dot": 1,
-            "plus": 0,
-        }
-
         try:
-            res = self.session.get(TEMP_TF_ACCOUNT_API, params=params, timeout=12)
+            res = self.session.get(f"{TEMP_TF_ACCOUNT_API}?providers=high.edu.pl", timeout=10)
             if res.status_code == 200:
-                data = res.json()
-                email = data.get("email")
-                if email and isinstance(email, str) and "@" in email:
-                    return email.strip()
-        except Exception as e:
+                email = res.json().get("email")
+                if email and "@" in email:
+                    return email.strip().lower()
+        except Exception:
             pass
 
-        # Fallback to general provider if gmail limit hit
-        fallback_res = self.session.get(TEMP_TF_ACCOUNT_API, timeout=10)
-        data = fallback_res.json()
-        email = data.get("email")
-        if email:
-            return email.strip()
+        # Fallback default endpoint temp.tf
+        try:
+            res = self.session.get(TEMP_TF_ACCOUNT_API, timeout=10)
+            if res.status_code == 200:
+                email = res.json().get("email")
+                if email and "@" in email:
+                    return email.strip().lower()
+        except Exception:
+            pass
 
-        raise RuntimeError("Gagal mendapatkan email Gmail dari temp.tf API.")
+        raise RuntimeError("Gagal mendapatkan email unik dari temp.tf API.")
 
     def poll_for_otp(
         self,
