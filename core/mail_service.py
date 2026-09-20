@@ -35,7 +35,7 @@ class TempTFMailService:
         params = {
             "providers": "gmail",
             "dot": 1,
-            "plus": 1,
+            "plus": 0,
         }
 
         try:
