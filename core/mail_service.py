@@ -11,10 +11,12 @@ from config import EMAIL_POLL_INTERVAL, EMAIL_WAIT_TIMEOUT
 
 class TempTFMailService:
     """
-    Next-Gen Rotating Mail Engine via Temp-Mail.io REST API:
-    - Rotates obscure TLDs & fresh domains (e.g. @ruutukf.com, @gmeenramy.com, @ooynib.com, @olipii.com)
-    - Bypass global disposable blocklists (unlisted & rotated regularly)
-    - Instant OTP extraction from subject and body
+    Dual Engine High-Reliability Mail Service:
+    1. Primary Engine: TempMail.plus (Domains: rover.info, fexbox.org, merepost.com, any.pink)
+       - Obscure non-mail domain extensions (.info, .org, .pink)
+       - Bypass global disposable blocklists
+       - Direct, fast JSON API with zero delay
+    2. Fallback Engine: Temp-Mail.io (ruutukf.com, olipii.com, etc.)
     """
 
     def __init__(self, session: Optional[requests.Session] = None):
@@ -25,71 +27,57 @@ class TempTFMailService:
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/128.0.0.0 Safari/537.36"
             ),
-            "Accept": "application/json",
-            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
         })
+        self.engine = "tempmail_plus"
         self.email_address = None
         self.token = None
-        self.cached_domains = [
-            "ruutukf.com",
-            "gmeenramy.com",
-            "olipii.com",
-            "ooynib.com",
-            "lnovic.com",
-            "ozsaip.com",
-            "yzcalo.com",
+
+        # Domain-domain non-mail yang lolos filter PixVerse
+        self.plus_domains = [
+            "rover.info",
+            "fexbox.org",
+            "merepost.com",
+            "any.pink",
+            "fextemp.com",
         ]
 
     def create_inbox(self) -> str:
-        """Create fresh unique temporary mailbox with an obscure non-blacklisted domain."""
-        # 1. Update daftar domain terbaru dari API
+        """Generate fresh inbox with a clean, natural username on an unblocked domain."""
+        # 1. Gunakan TempMail.plus dengan domain acak
+        try:
+            chosen_domain = random.choice(self.plus_domains)
+            # Pola nama user natural: nama depan + angka
+            first_names = ["alex", "jordan", "david", "kevin", "brian", "marcus", "ryan", "steven", "daniel", "arthur"]
+            rand_name = random.choice(first_names) + "".join(random.choices(string.digits, k=5))
+            self.email_address = f"{rand_name}@{chosen_domain}"
+            self.engine = "tempmail_plus"
+            return self.email_address
+        except Exception:
+            pass
+
+        # 2. Fallback ke Temp-Mail.io jika perlu
         try:
             dom_res = self.session.get("https://api.internal.temp-mail.io/api/v3/domains", timeout=6)
+            domain_name = "ruutukf.com"
             if dom_res.status_code == 200:
                 domains_data = dom_res.json().get("domains", [])
-                names = [d["name"] for d in domains_data if "name" in d]
-                if names:
-                    self.cached_domains = names
-        except Exception:
-            pass
+                if domains_data:
+                    domain_name = random.choice(domains_data).get("name", "ruutukf.com")
 
-        # Pilih domain secara acak (hindari yang paling atas / sering dipakai)
-        selected_domain = random.choice(self.cached_domains)
-        # Buat nama user yang menyerupai nama natural (bukan bot string acak)
-        first_names = ["alex", "jordan", "david", "kevin", "brian", "marcus", "ryan", "steven", "daniel", "arthur"]
-        rand_name = random.choice(first_names) + "".join(random.choices(string.digits, k=5))
-
-        payload = {
-            "name": rand_name,
-            "domain": selected_domain,
-        }
-
-        try:
-            res = self.session.post("https://api.internal.temp-mail.io/api/v3/email/new", json=payload, timeout=8)
+            rand_user = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
+            payload = {"name": rand_user, "domain": domain_name}
+            res = self.session.post("https://api.internal.temp-mail.io/api/v3/email/new", json=payload, timeout=6)
             if res.status_code == 200:
                 data = res.json()
                 self.email_address = data.get("email")
                 self.token = data.get("token")
-                return self.email_address
-        except Exception as e:
-            pass
-
-        # Fallback random generate jika custom nama gagal
-        try:
-            res = self.session.post(
-                "https://api.internal.temp-mail.io/api/v3/email/new",
-                json={"min_name_length": 8, "max_name_length": 10},
-                timeout=8,
-            )
-            if res.status_code == 200:
-                data = res.json()
-                self.email_address = data.get("email")
-                self.token = data.get("token")
+                self.engine = "temp_mail_io"
                 return self.email_address
         except Exception:
             pass
 
-        raise RuntimeError("Gagal mendapatkan email dari engine Temp-Mail.io.")
+        raise RuntimeError("Gagal membuat email sementara.")
 
     def poll_for_otp(
         self,
@@ -111,26 +99,50 @@ class TempTFMailService:
                 last_log = time.time()
                 log_callback(f"Menunggu kode OTP masuk ke {email} ({elapsed}s/{timeout}s)...")
 
-            try:
-                res = self.session.get(
-                    f"https://api.internal.temp-mail.io/api/v3/email/{email}/messages",
-                    timeout=7,
-                )
-                if res.status_code == 200:
-                    messages = res.json()
-                    if isinstance(messages, list) and messages:
-                        for msg in messages:
-                            subject = msg.get("subject", "")
-                            body_text = msg.get("body_text", "")
-                            body_html = msg.get("body_html", "")
-                            combined = f"{subject} {body_text} {body_html}"
-                            otp = self._extract_otp_from_text(combined)
+            # Engine: TempMail.plus
+            if self.engine == "tempmail_plus":
+                try:
+                    url = f"https://tempmail.plus/api/mails?email={email}&limit=5"
+                    res = self.session.get(url, timeout=6)
+                    if res.status_code == 200:
+                        body = res.json()
+                        mail_list = body.get("mail_list", [])
+                        for item in mail_list:
+                            subject = item.get("subject", "")
+                            otp = self._extract_otp_from_text(subject)
                             if otp:
                                 return otp
-            except Exception:
-                pass
 
-            time.sleep(1.8)
+                            mail_id = item.get("mail_id")
+                            if mail_id:
+                                detail_url = f"https://tempmail.plus/api/mails/{mail_id}?email={email}"
+                                detail_res = self.session.get(detail_url, timeout=6).json()
+                                full_content = f"{detail_res.get('text', '')} {detail_res.get('html', '')}"
+                                otp = self._extract_otp_from_text(full_content)
+                                if otp:
+                                    return otp
+                except Exception:
+                    pass
+
+            # Engine: Temp-Mail.io
+            elif self.engine == "temp_mail_io":
+                try:
+                    res = self.session.get(
+                        f"https://api.internal.temp-mail.io/api/v3/email/{email}/messages",
+                        timeout=6,
+                    )
+                    if res.status_code == 200:
+                        messages = res.json()
+                        if isinstance(messages, list) and messages:
+                            for msg in messages:
+                                full_text = f"{msg.get('subject', '')} {msg.get('body_text', '')} {msg.get('body_html', '')}"
+                                otp = self._extract_otp_from_text(full_text)
+                                if otp:
+                                    return otp
+                except Exception:
+                    pass
+
+            time.sleep(1.5)
 
         raise TimeoutError(f"Waktu habis ({timeout}s) menunggu kode OTP dari PixVerse.")
 
