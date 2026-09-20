@@ -1,19 +1,18 @@
 import json
-import random
 import re
-import string
 import time
 from typing import Callable, Optional
 
 import requests
-from config import EMAIL_POLL_INTERVAL, EMAIL_WAIT_TIMEOUT, TEMP_TF_ACCOUNT_API, TEMP_TF_CHECK_API
+from config import EMAIL_WAIT_TIMEOUT, TEMP_TF_ACCOUNT_API, TEMP_TF_CHECK_API
 
 
 class TempTFMailService:
     """
-    High-speed Disposable Mailbox Client with Dual-Engine Architecture:
-    1. Primary Engine: temp.tf (clean EDU/Outlook/Gmail domains)
-    2. Fast-Polling Engine: Mail.tm (instant sub-second API responses & dedicated webhooks)
+    Temporary Gmail Engine via temp.tf.
+    Converted from Node.js axios scraper implementation:
+    - GET  https://temp.tf/api/account?providers=gmail&dot=1&plus=1
+    - POST https://temp.tf/api/check with { email, wait: True } (Long-Polling)
     """
 
     def __init__(self, session: Optional[requests.Session] = None):
@@ -24,68 +23,39 @@ class TempTFMailService:
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/128.0.0.0 Safari/537.36"
             ),
-            "Referer": "https://temp.tf/",
-            "Accept": "application/json, text/plain, */*",
+            "Accept": "application/json",
+            "Referer": "https://temp.tf",
         })
-        self.active_provider = "temp.tf"
-        self._mailtm_token = None
-        self._mailtm_domain = "uberip.com"
 
     def create_inbox(self) -> str:
         """
-        Request a fresh email address.
-        Tries temp.tf first; if slow/unreachable, falls back to mail.tm.
+        Request a real temporary Gmail address using dot and plus syntax.
+        Matches Node.js snippet: providers=gmail, dot=1, plus=1.
         """
-        # 1. Coba temp.tf API
-        urls_to_try = [
-            TEMP_TF_ACCOUNT_API,
-            f"{TEMP_TF_ACCOUNT_API}?providers=high.edu.pl",
-            f"{TEMP_TF_ACCOUNT_API}?providers=outlook.com&plus=1",
-        ]
+        params = {
+            "providers": "gmail",
+            "dot": 1,
+            "plus": 1,
+        }
 
-        for url in urls_to_try:
-            try:
-                res = self.session.get(url, timeout=8)
-                if res.status_code == 200:
-                    data = res.json()
-                    email = data.get("email")
-                    if email and isinstance(email, str) and "@" in email:
-                        self.active_provider = "temp.tf"
-                        return email.strip().lower()
-            except Exception:
-                continue
-
-        # 2. Fallback ke Mail.tm (Super fast)
         try:
-            email, token = self._create_mailtm_inbox()
-            self._mailtm_token = token
-            self.active_provider = "mail.tm"
-            return email
+            res = self.session.get(TEMP_TF_ACCOUNT_API, params=params, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                email = data.get("email")
+                if email and isinstance(email, str) and "@" in email:
+                    return email.strip()
         except Exception as e:
-            raise RuntimeError(f"Gagal membuat temporary email dari semua provider: {e}")
+            pass
 
-    def _create_mailtm_inbox(self) -> tuple:
-        """Create fresh inbox on Mail.tm."""
-        rand_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        email = f"user_{rand_id}@{self._mailtm_domain}"
-        password = "PixPassword!99"
+        # Fallback to general provider if gmail limit hit
+        fallback_res = self.session.get(TEMP_TF_ACCOUNT_API, timeout=10)
+        data = fallback_res.json()
+        email = data.get("email")
+        if email:
+            return email.strip()
 
-        payload = {"address": email, "password": password}
-        res = self.session.post("https://api.mail.tm/accounts", json=payload, timeout=8)
-        if res.status_code not in (200, 201):
-            # Refresh domain
-            dom_res = self.session.get("https://api.mail.tm/domains", timeout=8)
-            members = dom_res.json().get("hydra:member", [])
-            if members:
-                self._mailtm_domain = members[0]["domain"]
-                email = f"user_{rand_id}@{self._mailtm_domain}"
-                payload["address"] = email
-                self.session.post("https://api.mail.tm/accounts", json=payload, timeout=8)
-
-        token_res = self.session.post("https://api.mail.tm/token", json=payload, timeout=8)
-        token_data = token_res.json()
-        token = token_data.get("token")
-        return email, token
+        raise RuntimeError("Gagal mendapatkan email Gmail dari temp.tf API.")
 
     def poll_for_otp(
         self,
@@ -95,93 +65,72 @@ class TempTFMailService:
         log_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
         """
-        High-frequency adaptive polling for OTP verification email.
-        Poll interval dynamically scales (fast 1.2s checks initially, then 2.5s).
+        Long-poll temp.tf check API with wait: True for instant OTP arrival.
+        Server holds connection open and pushes message the moment it arrives.
         """
         start_time = time.time()
-        last_log_time = 0
+        poll_count = 0
 
         while time.time() - start_time < timeout:
             if stop_check and stop_check():
-                raise InterruptedError("Proses polling OTP dihentikan oleh pengguna.")
+                raise InterruptedError("Proses dihentikan oleh pengguna.")
 
+            poll_count += 1
             elapsed = int(time.time() - start_time)
-            if log_callback and (time.time() - last_log_time >= 4):
-                last_log_time = time.time()
-                log_callback(f"Menunggu kode OTP masuk ({elapsed}s/{timeout}s)...")
+            if log_callback and (poll_count == 1 or poll_count % 2 == 0):
+                log_callback(f"Menunggu kode OTP masuk ke {email} ({elapsed}s/{timeout}s)...")
 
-            # Polling temp.tf
-            if self.active_provider == "temp.tf":
-                try:
-                    payload = {"email": email, "wait": False}
-                    res = self.session.post(
-                        TEMP_TF_CHECK_API,
-                        json=payload,
-                        timeout=5,
-                    )
-                    if res.status_code == 200:
-                        body = res.json()
-                        messages = body.get("data", [])
-                        if messages:
-                            for msg in messages:
-                                otp = self._extract_otp_from_message(msg)
-                                if otp:
-                                    return otp
-                except Exception:
-                    pass
+            try:
+                # Long-polling wait: True sesuai snippet Node.js
+                payload = {
+                    "email": email,
+                    "wait": True,
+                }
+                res = self.session.post(
+                    TEMP_TF_CHECK_API,
+                    json=payload,
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    timeout=20,
+                )
 
-            # Polling Mail.tm
-            elif self.active_provider == "mail.tm" and self._mailtm_token:
-                try:
-                    headers = {"Authorization": f"Bearer {self._mailtm_token}"}
-                    res = self.session.get("https://api.mail.tm/messages", headers=headers, timeout=5)
-                    if res.status_code == 200:
-                        members = res.json().get("hydra:member", [])
-                        for item in members:
-                            subject = item.get("subject", "")
-                            intro = item.get("intro", "")
-                            otp = self._extract_otp_from_text(f"{subject} {intro}")
+                if res.status_code == 200:
+                    data = res.json().get("data", [])
+                    if data:
+                        for msg in data:
+                            otp = self._extract_otp_from_message(msg)
                             if otp:
                                 return otp
-                            # Fetch full message
-                            msg_id = item.get("id")
-                            if msg_id:
-                                detail = self.session.get(f"https://api.mail.tm/messages/{msg_id}", headers=headers, timeout=5).json()
-                                otp = self._extract_otp_from_message(detail)
-                                if otp:
-                                    return otp
-                except Exception:
-                    pass
-
-            # Adaptive fast sleep: 1.2s untuk 30 detik pertama, lalu 2.5s
-            poll_interval = 1.2 if elapsed < 30 else 2.5
-            time.sleep(poll_interval)
+            except requests.exceptions.Timeout:
+                # Normal saat long-poll timeout, langsung loop berikutnya
+                continue
+            except Exception:
+                time.sleep(1)
 
         raise TimeoutError(f"Waktu habis ({timeout}s) menunggu kode OTP dari PixVerse.")
-
-    @classmethod
-    def _extract_otp_from_text(cls, text: str) -> Optional[str]:
-        if not text:
-            return None
-        # Prioritas 1: cocokkan konteks OTP/code/verify
-        ctx = re.search(r"(?:code|kode|verification|verify)[^\d]{1,20}(\d{6})", text, re.IGNORECASE)
-        if ctx:
-            return ctx.group(1)
-        # Prioritas 2: angka 6 digit standalone
-        m = re.findall(r"\b(\d{6})\b", text)
-        return m[0] if m else None
 
     @classmethod
     def _extract_otp_from_message(cls, msg: dict) -> Optional[str]:
         search_fields = [
             msg.get("subject", ""),
             msg.get("snippet", ""),
-            msg.get("intro", ""),
             msg.get("text", ""),
             msg.get("html", ""),
         ]
-        for field in search_fields:
-            otp = cls._extract_otp_from_text(field)
-            if otp:
-                return otp
+
+        # Prioritas: Cocokkan kata kunci kode verifikasi
+        for text in search_fields:
+            if not text:
+                continue
+            ctx = re.search(r"(?:code|kode|verification|verify)[^\d]{1,20}(\d{6})", text, re.IGNORECASE)
+            if ctx:
+                return ctx.group(1)
+
+        # Fallback: Cari 6 digit angka
+        for text in search_fields:
+            if not text:
+                continue
+            matches = re.findall(r"\b(\d{6})\b", text)
+            if matches:
+                return matches[0]
+
         return None
