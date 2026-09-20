@@ -11,9 +11,9 @@ from config import EMAIL_POLL_INTERVAL, EMAIL_WAIT_TIMEOUT
 
 class TempTFMailService:
     """
-    Robust Mail Service with Automatic Failover:
-    - Primary: Mail.tm (Dedicated inbox, high rate-limit ceiling, zero Cloudflare blocks)
-    - Fallback: temp.tf (EDU/rotations)
+    Multi-Provider Resilient Mail Engine:
+    1. Primary: Inboxes.com (Rotated pool of 18+ clean, unblocked domains)
+    2. Secondary: Mail.tm (Instant API responses)
     """
 
     def __init__(self, session: Optional[requests.Session] = None):
@@ -26,63 +26,58 @@ class TempTFMailService:
             ),
             "Accept": "application/json",
         })
-        self.engine = "mail.tm"
-        self.token = None
+        self.engine = "inboxes.com"
         self.email_address = None
-        self.domain = "uberip.com"
+        self.mailtm_token = None
+
+        # Pool domain inboxes.com yang bersih dari filter Cloudflare / PixVerse
+        self.inboxes_domains = [
+            "givmail.com",
+            "replyloop.com",
+            "tafmail.com",
+            "chapsmail.com",
+            "dropjar.com",
+            "getairmail.com",
+            "fivermail.com",
+            "inboxbear.com",
+        ]
 
     def create_inbox(self) -> str:
-        """Create fresh unique temporary mailbox."""
-        # 1. Coba Mail.tm terlebih dahulu (Sangat stabil & tidak kena 429)
+        """Create fresh unique temporary mailbox using fresh rotated domains."""
+        # 1. Coba Inboxes.com (Pool domain alternatif)
         try:
-            email, token = self._create_mailtm()
-            self.engine = "mail.tm"
-            self.token = token
-            self.email_address = email
-            return email
+            domain_res = self.session.get("https://inboxes.com/api/v2/domain", timeout=7)
+            if domain_res.status_code == 200:
+                online_domains = [d.get("qdn") for d in domain_res.json().get("domains", []) if d.get("qdn")]
+                if online_domains:
+                    self.inboxes_domains = online_domains
+
+            chosen_domain = random.choice(self.inboxes_domains)
+            rand_user = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
+            self.email_address = f"user_{rand_user}@{chosen_domain}"
+            self.engine = "inboxes.com"
+            return self.email_address
         except Exception:
             pass
 
-        # 2. Fallback ke temp.tf jika Mail.tm terkendala
+        # 2. Fallback Mail.tm
         try:
-            res = self.session.get("https://temp.tf/api/account?providers=high.edu.pl", timeout=8)
-            if res.status_code == 200:
-                email = res.json().get("email")
-                if email and "@" in email:
-                    self.engine = "temp.tf"
-                    self.email_address = email.strip().lower()
-                    return self.email_address
+            d_res = self.session.get("https://api.mail.tm/domains", timeout=6)
+            domain = d_res.json()["hydra:member"][0]["domain"]
+            rand_user = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
+            address = f"user_{rand_user}@{domain}"
+            pwd = "PixVersePass_99!"
+            self.session.post("https://api.mail.tm/accounts", json={"address": address, "password": pwd}, timeout=6)
+            token = self.session.post("https://api.mail.tm/token", json={"address": address, "password": pwd}, timeout=6).json().get("token")
+            if token:
+                self.email_address = address
+                self.mailtm_token = token
+                self.engine = "mail.tm"
+                return address
         except Exception:
             pass
 
-        raise RuntimeError("Gagal membuat email sementara dari semua provider.")
-
-    def _create_mailtm(self) -> tuple:
-        """Create a dedicated Mail.tm inbox and acquire JWT Bearer token."""
-        # Ambil domain aktif
-        try:
-            d_res = self.session.get("https://api.mail.tm/domains", timeout=8)
-            members = d_res.json().get("hydra:member", [])
-            if members:
-                self.domain = members[0]["domain"]
-        except Exception:
-            pass
-
-        rand_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
-        address = f"user_{rand_id}@{self.domain}"
-        password = "PixVersePass_99!"
-
-        payload = {"address": address, "password": password}
-        reg_res = self.session.post("https://api.mail.tm/accounts", json=payload, timeout=8)
-        if reg_res.status_code not in (200, 201):
-            raise RuntimeError(f"Gagal create akun mail.tm: {reg_res.text}")
-
-        token_res = self.session.post("https://api.mail.tm/token", json=payload, timeout=8)
-        token = token_res.json().get("token")
-        if not token:
-            raise RuntimeError("Gagal memperoleh token mail.tm")
-
-        return address, token
+        raise RuntimeError("Gagal membuat email disposable dari semua provider.")
 
     def poll_for_otp(
         self,
@@ -104,28 +99,22 @@ class TempTFMailService:
                 last_log = time.time()
                 log_callback(f"Menunggu kode OTP masuk ke {email} ({elapsed}s/{timeout}s)...")
 
-            # Engine: Mail.tm
-            if self.engine == "mail.tm" and self.token:
+            # Engine: Inboxes.com
+            if self.engine == "inboxes.com":
                 try:
-                    headers = {"Authorization": f"Bearer {self.token}"}
-                    m_res = self.session.get("https://api.mail.tm/messages", headers=headers, timeout=6)
-                    if m_res.status_code == 200:
-                        items = m_res.json().get("hydra:member", [])
-                        for item in items:
-                            subject = item.get("subject", "")
-                            intro = item.get("intro", "")
-                            otp = self._extract_otp_from_text(f"{subject} {intro}")
+                    res = self.session.get(f"https://inboxes.com/api/v2/inbox/{email}", timeout=7)
+                    if res.status_code == 200:
+                        msgs = res.json().get("msgs", [])
+                        for m in msgs:
+                            subject = m.get("s", "")
+                            otp = self._extract_otp_from_text(subject)
                             if otp:
                                 return otp
 
-                            # Ambil detail message lengkap
-                            msg_id = item.get("id")
+                            # Ambil detail message body
+                            msg_id = m.get("uid") or m.get("id")
                             if msg_id:
-                                detail = self.session.get(
-                                    f"https://api.mail.tm/messages/{msg_id}",
-                                    headers=headers,
-                                    timeout=6,
-                                ).json()
+                                detail = self.session.get(f"https://inboxes.com/api/v2/message/{msg_id}", timeout=7).json()
                                 full_text = f"{detail.get('text', '')} {detail.get('html', '')}"
                                 otp = self._extract_otp_from_text(full_text)
                                 if otp:
@@ -133,22 +122,20 @@ class TempTFMailService:
                 except Exception:
                     pass
 
-            # Engine: temp.tf
-            elif self.engine == "temp.tf":
+            # Engine: Mail.tm
+            elif self.engine == "mail.tm" and self.mailtm_token:
                 try:
-                    payload = {"email": email, "wait": False}
-                    res = self.session.post("https://temp.tf/api/check", json=payload, timeout=8)
-                    if res.status_code == 200:
-                        msgs = res.json().get("data", [])
-                        for m in msgs:
-                            full_text = f"{m.get('subject', '')} {m.get('snippet', '')} {m.get('text', '')} {m.get('html', '')}"
-                            otp = self._extract_otp_from_text(full_text)
+                    headers = {"Authorization": f"Bearer {self.mailtm_token}"}
+                    m_res = self.session.get("https://api.mail.tm/messages", headers=headers, timeout=6)
+                    if m_res.status_code == 200:
+                        for item in m_res.json().get("hydra:member", []):
+                            otp = self._extract_otp_from_text(f"{item.get('subject', '')} {item.get('intro', '')}")
                             if otp:
                                 return otp
                 except Exception:
                     pass
 
-            time.sleep(EMAIL_POLL_INTERVAL)
+            time.sleep(1.8)
 
         raise TimeoutError(f"Waktu habis ({timeout}s) menunggu kode OTP dari PixVerse.")
 
@@ -156,10 +143,10 @@ class TempTFMailService:
     def _extract_otp_from_text(text: str) -> Optional[str]:
         if not text:
             return None
-        # 1. Konteks code / verify
+        # 1. Konteks kata sandi / verifikasi / code
         ctx = re.search(r"(?:code|kode|verification|verify)[^\d]{1,20}(\d{6})", text, re.IGNORECASE)
         if ctx:
             return ctx.group(1)
-        # 2. Standalone 6 digit
+        # 2. Standalone 6 digit angka
         m = re.findall(r"\b(\d{6})\b", text)
         return m[0] if m else None
